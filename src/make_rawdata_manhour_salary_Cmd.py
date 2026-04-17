@@ -2896,10 +2896,6 @@ def build_new_rawdata_step0028_output_path_from_step0027(objStep0027Path: Path) 
     return objStep0027Path.resolve().parent / pszOutputFileName
 
 
-def build_new_rawdata_step0028_error_path_from_step0028(objStep0028Path: Path) -> Path:
-    return objStep0028Path.resolve().parent / f"{objStep0028Path.stem}_error.txt"
-
-
 def process_new_rawdata_step0028_from_step0027(
     objStep0027Path: Path,
 ) -> int:
@@ -2908,13 +2904,7 @@ def process_new_rawdata_step0028_from_step0027(
         raise ValueError(f"Input TSV has no rows: {objStep0027Path}")
 
     objHeaderRow: List[str] = list(objInputRows[0])
-    objOutputPath: Path = build_new_rawdata_step0028_output_path_from_step0027(objStep0027Path)
-    if "借方本体金額" not in objHeaderRow:
-        objErrorPath: Path = build_new_rawdata_step0028_error_path_from_step0028(objOutputPath)
-        objErrorPath.write_text("step0027 に借方本体金額列がありません。\n", encoding="utf-8")
-        raise ValueError(f"Missing required header: 借方本体金額. Input = {objStep0027Path}")
-
-    iDebitAmountIndex: int = objHeaderRow.index("借方本体金額")
+    iDebitAmountIndex: int = objHeaderRow.index("借方本体金額") if "借方本体金額" in objHeaderRow else len(objHeaderRow)
     iInsertIndex: int = iDebitAmountIndex + 1
     objInsertedHeaders: List[str] = [
         "貸方部門コード",
@@ -2946,6 +2936,7 @@ def process_new_rawdata_step0028_from_step0027(
     objOutputRows[1][iInsertIndex + 2] = "6"
     objOutputRows[1][iInsertIndex + 9] = "社員通勤定期代振替"
 
+    objOutputPath: Path = build_new_rawdata_step0028_output_path_from_step0027(objStep0027Path)
     write_sheet_to_tsv(objOutputPath, objOutputRows)
     process_new_rawdata_step0029_from_step0028(objOutputPath)
     return 0
@@ -4254,38 +4245,6 @@ def process_new_rawdata_step0018_statutory_welfare_from_step0017_statutory_welfa
         objStep0017StatutoryWelfarePath
     )
     write_sheet_to_tsv(objOutputPath, objOutputRows)
-    process_new_rawdata_step0019_statutory_welfare_from_step0018_statutory_welfare(objOutputPath)
-    return 0
-
-
-def build_new_rawdata_step0019_statutory_welfare_output_path_from_step0018_statutory_welfare(
-    objStep0018StatutoryWelfarePath: Path,
-) -> Path:
-    pszFileName: str = objStep0018StatutoryWelfarePath.name
-    if "_step0018_法定福利費_" not in pszFileName:
-        raise ValueError(f"Input is not step0018 statutory welfare file: {objStep0018StatutoryWelfarePath}")
-    pszOutputFileName: str = pszFileName.replace("_step0018_法定福利費_", "_step0019_法定福利費_", 1)
-    return objStep0018StatutoryWelfarePath.resolve().parent / pszOutputFileName
-
-
-def process_new_rawdata_step0019_statutory_welfare_from_step0018_statutory_welfare(
-    objStep0018StatutoryWelfarePath: Path,
-) -> int:
-    objInputRows: List[List[str]] = read_tsv_rows(objStep0018StatutoryWelfarePath)
-    if not objInputRows:
-        raise ValueError(f"Input TSV has no rows: {objStep0018StatutoryWelfarePath}")
-
-    objOutputRows: List[List[str]] = []
-    for iRowIndex, objRow in enumerate(objInputRows):
-        if iRowIndex == 0:
-            objOutputRows.append(["No"] + list(objRow))
-        else:
-            objOutputRows.append([str(iRowIndex)] + list(objRow))
-
-    objOutputPath: Path = build_new_rawdata_step0019_statutory_welfare_output_path_from_step0018_statutory_welfare(
-        objStep0018StatutoryWelfarePath
-    )
-    write_sheet_to_tsv(objOutputPath, objOutputRows)
     return 0
 
 
@@ -5109,7 +5068,6 @@ def main() -> int:
     objNewRawdataStep0015StatutoryWelfarePaths: List[Path] = []
     objNewRawdataStep0016StatutoryWelfarePaths: List[Path] = []
     objNewRawdataStep0017StatutoryWelfarePaths: List[Path] = []
-    objNewRawdataStep0018StatutoryWelfarePaths: List[Path] = []
     objManagementAccountingCandidatePaths: List[Path] = []
 
 
@@ -5188,8 +5146,6 @@ def main() -> int:
             objNewRawdataStep0016StatutoryWelfarePaths.append(objResolvedInputPath)
         if NEW_RAWDATA_STEP0017_STATUTORY_WELFARE_FILE_PATTERN.match(objResolvedInputPath.name) is not None:
             objNewRawdataStep0017StatutoryWelfarePaths.append(objResolvedInputPath)
-        if NEW_RAWDATA_STEP0018_STATUTORY_WELFARE_FILE_PATTERN.match(objResolvedInputPath.name) is not None:
-            objNewRawdataStep0018StatutoryWelfarePaths.append(objResolvedInputPath)
 
         if objResolvedInputPath.suffix.lower() in (".tsv", ".csv", ".xlsx"):
             objManagementAccountingCandidatePaths.append(objResolvedInputPath)
@@ -6090,24 +6046,6 @@ def main() -> int:
                 print(
                     "Error: failed to process step0018 from step0017 statutory welfare: {0}. Detail = {1}".format(
                         objNewRawdataStep0017StatutoryWelfarePath,
-                        objException,
-                    )
-                )
-                iExitCode = 1
-
-    if objNewRawdataStep0018StatutoryWelfarePaths:
-        for objNewRawdataStep0018StatutoryWelfarePath in objNewRawdataStep0018StatutoryWelfarePaths:
-            if objNewRawdataStep0018StatutoryWelfarePath.resolve() in objHandledInputPaths:
-                continue
-            try:
-                process_new_rawdata_step0019_statutory_welfare_from_step0018_statutory_welfare(
-                    objNewRawdataStep0018StatutoryWelfarePath
-                )
-                objHandledInputPaths.add(objNewRawdataStep0018StatutoryWelfarePath.resolve())
-            except Exception as objException:
-                print(
-                    "Error: failed to process step0019 from step0018 statutory welfare: {0}. Detail = {1}".format(
-                        objNewRawdataStep0018StatutoryWelfarePath,
                         objException,
                     )
                 )
