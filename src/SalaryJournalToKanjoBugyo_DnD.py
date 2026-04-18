@@ -9,8 +9,10 @@ SalaryJournalToKanjoBugyo_DnD.py
 from __future__ import annotations
 
 import ctypes
+from datetime import datetime
 import os
 import re
+import shutil
 import subprocess
 import sys
 import traceback
@@ -86,6 +88,55 @@ def append_error_log(pszMessage: str) -> None:
     )
     with open(pszOutputPath, "a", encoding="utf-8", newline="") as objFile:
         objFile.write(pszMessage + "\n")
+
+
+def resolve_company_or_division_directory(objDroppedPaths: Optional[List[Path]] = None) -> Path:
+    objCandidates: List[Path] = []
+    if objDroppedPaths:
+        for objPath in objDroppedPaths:
+            objParent: Path = objPath.resolve().parent
+            if objParent not in objCandidates:
+                objCandidates.append(objParent)
+    objScriptDirectory: Path = Path(__file__).resolve().parent
+    if objScriptDirectory not in objCandidates:
+        objCandidates.append(objScriptDirectory)
+    objCurrentDirectory: Path = Path.cwd().resolve()
+    if objCurrentDirectory not in objCandidates:
+        objCandidates.append(objCurrentDirectory)
+
+    for objDirectory in objCandidates:
+        objModePath: Path = objDirectory / "company_or_division.txt"
+        if objModePath.is_file():
+            return objDirectory
+
+    objTargetDirectory: Path = objDroppedPaths[0].resolve().parent if objDroppedPaths else objScriptDirectory
+    objTargetDirectory.mkdir(parents=True, exist_ok=True)
+    objTargetModePath: Path = objTargetDirectory / "company_or_division.txt"
+    objScriptModePath: Path = objScriptDirectory / "company_or_division.txt"
+    if objScriptModePath.is_file():
+        shutil.copy2(str(objScriptModePath), str(objTargetModePath))
+    elif not objTargetModePath.exists():
+        objTargetModePath.write_text("", encoding="utf-8")
+    return objTargetDirectory
+
+
+def append_fallback_status_log(
+    objDroppedPaths: List[Path],
+    objStatuses: dict[str, str],
+    pszSelectedModeOrException: str,
+) -> None:
+    objOutputDirectory: Path = resolve_company_or_division_directory(objDroppedPaths)
+    objOutputPath: Path = objOutputDirectory / "log_DnD_input_count_fallback_success_failure.txt"
+    objLogLine: str = "\t".join([
+        datetime.now().isoformat(timespec="seconds"),
+        str(len(objDroppedPaths)),
+        objStatuses.get("combined4", "未実行"),
+        objStatuses.get("legacy", "未実行"),
+        objStatuses.get("make_rawdata", "未実行"),
+        pszSelectedModeOrException,
+    ])
+    with objOutputPath.open("a", encoding="utf-8", newline="") as objFile:
+        objFile.write(objLogLine + "\n")
 
 
 def report_exception(pszContext: str, exc: Exception) -> None:
@@ -678,21 +729,41 @@ def build_make_rawdata_error_report(
 
 
 def resolve_drop_inputs_with_fallback(objDroppedPaths: List[Path]) -> tuple[str, tuple[Path, ...]]:
+    objStatuses: dict[str, str] = {
+        "combined4": "未実行",
+        "legacy": "未実行",
+        "make_rawdata": "未実行",
+    }
     try:
         objCombined = resolve_combined_four_input_drop_inputs(objDroppedPaths)
+        objStatuses["combined4"] = "成功"
         append_error_log("Detected combined4 dropped-file set. Running combined4 flow.")
+        append_fallback_status_log(objDroppedPaths, objStatuses, "combined4")
         return "combined4", objCombined
     except Exception:
-        pass
+        objStatuses["combined4"] = "失敗"
     try:
         objLegacy = resolve_legacy_drop_inputs(objDroppedPaths)
+        objStatuses["legacy"] = "成功"
         append_error_log("Detected legacy dropped-file set. Running legacy flow.")
+        append_fallback_status_log(objDroppedPaths, objStatuses, "legacy")
         return "legacy", objLegacy
     except Exception:
-        pass
-    objMakeRawdata = resolve_make_rawdata_drop_inputs(objDroppedPaths)
-    append_error_log("Detected make_rawdata dropped-file set. Running make_rawdata flow.")
-    return "make_rawdata", objMakeRawdata
+        objStatuses["legacy"] = "失敗"
+    try:
+        objMakeRawdata = resolve_make_rawdata_drop_inputs(objDroppedPaths)
+        objStatuses["make_rawdata"] = "成功"
+        append_error_log("Detected make_rawdata dropped-file set. Running make_rawdata flow.")
+        append_fallback_status_log(objDroppedPaths, objStatuses, "make_rawdata")
+        return "make_rawdata", objMakeRawdata
+    except Exception as objException:
+        objStatuses["make_rawdata"] = "失敗"
+        append_fallback_status_log(
+            objDroppedPaths,
+            objStatuses,
+            f"{objException.__class__.__name__}: {objException}",
+        )
+        raise
 
 
 def run_legacy_three_stage_flow(objSelectedPaths: tuple[Path, Path, Path]) -> None:

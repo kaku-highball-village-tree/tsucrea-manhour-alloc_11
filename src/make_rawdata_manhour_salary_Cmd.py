@@ -4349,7 +4349,7 @@ def process_new_rawdata_step0021_statutory_welfare_from_step0020_statutory_welfa
         raise ValueError(f"Input TSV has no rows: {objStep0020StatutoryWelfarePath}")
 
     objHeaderRow: List[str] = list(objInputRows[0])
-    objRequiredHeaderNames: List[str] = ["プロジェクト名", "給与合計"]
+    objRequiredHeaderNames: List[str] = ["プロジェクト名", "法定福利費"]
     objRequiredIndices: List[int] = get_required_header_indices(objHeaderRow, objRequiredHeaderNames)
 
     objOutputRows: List[List[str]] = [objRequiredHeaderNames]
