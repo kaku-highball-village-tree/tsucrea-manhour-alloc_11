@@ -91,33 +91,18 @@ def append_error_log(pszMessage: str) -> None:
 
 
 def resolve_company_or_division_directory(objDroppedPaths: Optional[List[Path]] = None) -> Path:
-    objCandidates: List[Path] = []
-    if objDroppedPaths:
-        for objPath in objDroppedPaths:
-            objParent: Path = objPath.resolve().parent
-            if objParent not in objCandidates:
-                objCandidates.append(objParent)
     objScriptDirectory: Path = Path(__file__).resolve().parent
-    if objScriptDirectory not in objCandidates:
-        objCandidates.append(objScriptDirectory)
-    objCurrentDirectory: Path = Path.cwd().resolve()
-    if objCurrentDirectory not in objCandidates:
-        objCandidates.append(objCurrentDirectory)
-
-    for objDirectory in objCandidates:
-        objModePath: Path = objDirectory / "company_or_division.txt"
-        if objModePath.is_file():
-            return objDirectory
-
-    objTargetDirectory: Path = objDroppedPaths[0].resolve().parent if objDroppedPaths else objScriptDirectory
-    objTargetDirectory.mkdir(parents=True, exist_ok=True)
-    objTargetModePath: Path = objTargetDirectory / "company_or_division.txt"
+    objTargetModePath: Path = objScriptDirectory / "company_or_division.txt"
+    objScriptDirectory.mkdir(parents=True, exist_ok=True)
     objScriptModePath: Path = objScriptDirectory / "company_or_division.txt"
-    if objScriptModePath.is_file():
-        shutil.copy2(str(objScriptModePath), str(objTargetModePath))
-    elif not objTargetModePath.exists():
+    if not objTargetModePath.exists():
+        if objScriptModePath.is_file():
+            shutil.copy2(str(objScriptModePath), str(objTargetModePath))
+        else:
+            objTargetModePath.write_text("", encoding="utf-8")
+    elif not objTargetModePath.is_file():
         objTargetModePath.write_text("", encoding="utf-8")
-    return objTargetDirectory
+    return objScriptDirectory
 
 
 def append_fallback_status_log(
