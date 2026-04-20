@@ -71,6 +71,7 @@ NEW_RAWDATA_STEP0023_STATUTORY_WELFARE_FILE_PATTERN: re.Pattern[str] = re.compil
 NEW_RAWDATA_STEP0024_STATUTORY_WELFARE_FILE_PATTERN: re.Pattern[str] = re.compile(r"^新_ローデータ_シート_step0024_法定福利費_\d{4}年\d{2}月\.tsv$")
 NEW_RAWDATA_STEP0025_STATUTORY_WELFARE_FILE_PATTERN: re.Pattern[str] = re.compile(r"^新_ローデータ_シート_step0025_法定福利費_\d{4}年\d{2}月\.tsv$")
 NEW_RAWDATA_STEP0026_STATUTORY_WELFARE_FILE_PATTERN: re.Pattern[str] = re.compile(r"^新_ローデータ_シート_step0026_法定福利費_\d{4}年\d{2}月\.tsv$")
+NEW_RAWDATA_STEP0027_STATUTORY_WELFARE_FILE_PATTERN: re.Pattern[str] = re.compile(r"^新_ローデータ_シート_step0027_法定福利費_\d{4}年\d{2}月\.tsv$")
 PREPAYED_COMMUTE_STEP0006_MONTHLY_FILE_PATTERN: re.Pattern[str] = re.compile(
     r"^新_ローデータ_シート_step0006_(\d{4}年(?:04-09月|10-03月))_(\d{2})月_前払通勤交通費按分表\.tsv$"
 )
@@ -4792,6 +4793,519 @@ def build_new_rawdata_step0026_statutory_welfare_error_path_from_step0026_statut
     return objStep0026StatutoryWelfarePath.resolve().parent / f"{objStep0026StatutoryWelfarePath.stem}_error.txt"
 
 
+def build_new_rawdata_step0027_statutory_welfare_output_path_from_step0026_statutory_welfare(
+    objStep0026StatutoryWelfarePath: Path,
+) -> Path:
+    pszFileName: str = objStep0026StatutoryWelfarePath.name
+    if "_step0026_法定福利費_" not in pszFileName:
+        raise ValueError(f"Input is not step0026 statutory welfare file: {objStep0026StatutoryWelfarePath}")
+    pszOutputFileName: str = pszFileName.replace("_step0026_法定福利費_", "_step0027_法定福利費_", 1)
+    return objStep0026StatutoryWelfarePath.resolve().parent / pszOutputFileName
+
+
+def build_statutory_welfare_voucher_date_from_step0026_path(
+    objStep0026StatutoryWelfarePath: Path,
+) -> str:
+    objMatch: re.Match[str] | None = re.match(
+        r"^新_ローデータ_シート_step0026_法定福利費_(\d{4})年(\d{2})月\.tsv$",
+        objStep0026StatutoryWelfarePath.name,
+    )
+    if objMatch is None:
+        raise ValueError(f"Input is not step0026 statutory welfare file: {objStep0026StatutoryWelfarePath}")
+    iYear: int = int(objMatch.group(1))
+    iMonth: int = int(objMatch.group(2))
+    iLastDay: int = calendar.monthrange(iYear, iMonth)[1]
+    return f"{iYear}/{iMonth}/{iLastDay}"
+
+
+def process_new_rawdata_step0026_statutory_welfare_from_step0025_statutory_welfare_with_org_table(
+    objStep0025StatutoryWelfarePath: Path,
+) -> int:
+    objInputRows: List[List[str]] = read_tsv_rows(objStep0025StatutoryWelfarePath)
+    if not objInputRows:
+        raise ValueError(f"Input TSV has no rows: {objStep0025StatutoryWelfarePath}")
+
+    objBaseDirectoryPath: Path = objStep0025StatutoryWelfarePath.resolve().parent
+    write_org_table_statutory_welfare_tsv_from_csv(objBaseDirectoryPath)
+    objOrgTablePath: Path = objStep0025StatutoryWelfarePath.resolve().parent / "管轄PJ表_法定福利.tsv"
+    objCodeToDepartments, objErrorLines = load_org_table_department_codes_for_statutory_welfare(objOrgTablePath)
+
+    objHeaderRow: List[str] = list(objInputRows[0])
+    iDebitAccountCodeIndex: int = (
+        objHeaderRow.index("借方勘定科目コード")
+        if "借方勘定科目コード" in objHeaderRow
+        else 0
+    )
+    iProjectNameIndex: int = objHeaderRow.index("プロジェクト名") if "プロジェクト名" in objHeaderRow else -1
+    iInsertIndex: int = iDebitAccountCodeIndex
+
+    objOutputRows: List[List[str]] = []
+    for iRowIndex, objRow in enumerate(objInputRows):
+        objNewRow: List[str] = list(objRow)
+        if iRowIndex == 0:
+            pszDepartmentCode: str = "借方部門コード"
+        else:
+            pszDepartmentCode = ""
+            if iProjectNameIndex == -1:
+                objErrorLines.append("step0025_法定福利費 にプロジェクト名列がありません。")
+            else:
+                pszProjectName: str = objNewRow[iProjectNameIndex] if len(objNewRow) > iProjectNameIndex else ""
+                pszProjectCodePrefix: str = extract_project_code_prefix_step0017(pszProjectName)
+                objCandidates: List[str] = objCodeToDepartments.get(pszProjectCodePrefix, [])
+                if len(objCandidates) == 0:
+                    objErrorLines.append(
+                        f"管轄PJ表_法定福利.tsv に該当する部門コードがありません。プロジェクト名={pszProjectName} コード={pszProjectCodePrefix}"
+                    )
+                elif len(objCandidates) >= 2:
+                    pszDepartmentCode = objCandidates[0]
+                    objErrorLines.append(
+                        f"管轄PJ表_法定福利.tsv に一致候補が複数あります。先頭一致を採用しました。プロジェクト名={pszProjectName} コード={pszProjectCodePrefix}"
+                    )
+                else:
+                    pszDepartmentCode = objCandidates[0]
+        objNewRow.insert(iInsertIndex, pszDepartmentCode)
+        objOutputRows.append(objNewRow)
+
+    objOutputPath: Path = build_new_rawdata_step0026_statutory_welfare_output_path_from_step0025_statutory_welfare(
+        objStep0025StatutoryWelfarePath
+    )
+    write_sheet_to_tsv(objOutputPath, objOutputRows)
+    if objErrorLines:
+        objErrorPath: Path = build_new_rawdata_step0026_statutory_welfare_error_path_from_step0026_statutory_welfare(
+            objOutputPath
+        )
+        objErrorPath.write_text("\n".join(objErrorLines) + "\n", encoding="utf-8")
+    process_new_rawdata_step0027_statutory_welfare_from_step0026_statutory_welfare(objOutputPath)
+    return 0
+
+
+def process_new_rawdata_step0027_statutory_welfare_from_step0026_statutory_welfare(
+    objStep0026StatutoryWelfarePath: Path,
+) -> int:
+    objInputRows: List[List[str]] = read_tsv_rows(objStep0026StatutoryWelfarePath)
+    if not objInputRows:
+        raise ValueError(f"Input TSV has no rows: {objStep0026StatutoryWelfarePath}")
+
+    pszVoucherDate: str = build_statutory_welfare_voucher_date_from_step0026_path(objStep0026StatutoryWelfarePath)
+    objHeaderRow: List[str] = list(objInputRows[0])
+    iDebitDepartmentCodeIndex: int = (
+        objHeaderRow.index("借方部門コード")
+        if "借方部門コード" in objHeaderRow
+        else 0
+    )
+    iInsertIndex: int = iDebitDepartmentCodeIndex
+    objInsertedHeaders: List[str] = ["区切", "伝票区分コード", "日付"]
+
+    objOutputRows: List[List[str]] = []
+    for iRowIndex, objRow in enumerate(objInputRows):
+        objNewRow: List[str] = list(objRow)
+        objInsertedValues: List[str] = list(objInsertedHeaders) if iRowIndex == 0 else ["", "", ""]
+        objNewRow[iInsertIndex:iInsertIndex] = objInsertedValues
+        objOutputRows.append(objNewRow)
+
+    if len(objOutputRows) >= 2:
+        objOutputRows[1][iInsertIndex] = "*"
+        objOutputRows[1][iInsertIndex + 1] = "0"
+    for objRow in objOutputRows[1:]:
+        objRow[iInsertIndex + 2] = pszVoucherDate
+
+    objOutputPath: Path = build_new_rawdata_step0027_statutory_welfare_output_path_from_step0026_statutory_welfare(
+        objStep0026StatutoryWelfarePath
+    )
+    write_sheet_to_tsv(objOutputPath, objOutputRows)
+    process_new_rawdata_step0019_statutory_welfare_from_step0018_statutory_welfare(objOutputPath)
+    return 0
+
+
+def build_new_rawdata_step0019_statutory_welfare_output_path_from_step0018_statutory_welfare(
+    objStep0018StatutoryWelfarePath: Path,
+) -> Path:
+    pszFileName: str = objStep0018StatutoryWelfarePath.name
+    if "_step0018_法定福利費_" not in pszFileName:
+        raise ValueError(f"Input is not step0018 statutory welfare file: {objStep0018StatutoryWelfarePath}")
+    pszOutputFileName: str = pszFileName.replace("_step0018_法定福利費_", "_step0019_法定福利費_", 1)
+    return objStep0018StatutoryWelfarePath.resolve().parent / pszOutputFileName
+
+
+def process_new_rawdata_step0019_statutory_welfare_from_step0018_statutory_welfare(
+    objStep0018StatutoryWelfarePath: Path,
+) -> int:
+    objInputRows: List[List[str]] = read_tsv_rows(objStep0018StatutoryWelfarePath)
+    if not objInputRows:
+        raise ValueError(f"Input TSV has no rows: {objStep0018StatutoryWelfarePath}")
+
+    objHeaderRow: List[str] = list(objInputRows[0])
+    bHasHeader: bool = len(objHeaderRow) >= 1 and objHeaderRow[0].strip() == "プロジェクト名"
+    iDataStartIndex: int = 1 if bHasHeader else 0
+
+    objMatchedRows: List[Tuple[str, int, List[str]]] = []
+    objUnmatchedRows: List[Tuple[int, List[str]]] = []
+    for iRowIndex, objRow in enumerate(objInputRows[iDataStartIndex:], start=iDataStartIndex):
+        pszProjectName: str = (objRow[0] if len(objRow) >= 1 else "").strip()
+        pszProjectCodePrefix: str = extract_project_code_prefix_step0017(pszProjectName)
+        if is_supported_project_code_prefix_step0017(pszProjectCodePrefix):
+            objMatchedRows.append((pszProjectCodePrefix, iRowIndex, list(objRow)))
+        else:
+            objUnmatchedRows.append((iRowIndex, list(objRow)))
+
+    objMatchedRows.sort(key=lambda objItem: (objItem[0], objItem[1]))
+
+    objOutputRows: List[List[str]] = []
+    if bHasHeader:
+        objOutputRows.append(objHeaderRow)
+    objOutputRows.extend([objRow for _, _, objRow in objMatchedRows])
+    objOutputRows.extend([objRow for _, objRow in objUnmatchedRows])
+
+    objOutputPath: Path = build_new_rawdata_step0019_statutory_welfare_output_path_from_step0018_statutory_welfare(
+        objStep0018StatutoryWelfarePath
+    )
+    write_sheet_to_tsv(objOutputPath, objOutputRows)
+    process_new_rawdata_step0020_statutory_welfare_from_step0019_statutory_welfare(objOutputPath)
+    return 0
+
+
+def build_new_rawdata_step0020_statutory_welfare_output_path_from_step0019_statutory_welfare(
+    objStep0019StatutoryWelfarePath: Path,
+) -> Path:
+    pszFileName: str = objStep0019StatutoryWelfarePath.name
+    if "_step0019_法定福利費_" not in pszFileName:
+        raise ValueError(f"Input is not step0019 statutory welfare file: {objStep0019StatutoryWelfarePath}")
+    pszOutputFileName: str = pszFileName.replace("_step0019_法定福利費_", "_step0020_法定福利費_", 1)
+    return objStep0019StatutoryWelfarePath.resolve().parent / pszOutputFileName
+
+
+def process_new_rawdata_step0020_statutory_welfare_from_step0019_statutory_welfare(
+    objStep0019StatutoryWelfarePath: Path,
+) -> int:
+    objInputRows: List[List[str]] = read_tsv_rows(objStep0019StatutoryWelfarePath)
+    if not objInputRows:
+        raise ValueError(f"Input TSV has no rows: {objStep0019StatutoryWelfarePath}")
+
+    objOutputRows: List[List[str]] = []
+    for iRowIndex, objRow in enumerate(objInputRows):
+        if iRowIndex == 0:
+            objOutputRows.append(["No"] + list(objRow))
+        else:
+            objOutputRows.append([str(iRowIndex)] + list(objRow))
+
+    objOutputPath: Path = build_new_rawdata_step0020_statutory_welfare_output_path_from_step0019_statutory_welfare(
+        objStep0019StatutoryWelfarePath
+    )
+    write_sheet_to_tsv(objOutputPath, objOutputRows)
+    process_new_rawdata_step0021_statutory_welfare_from_step0020_statutory_welfare(objOutputPath)
+    return 0
+
+
+def build_new_rawdata_step0021_statutory_welfare_output_path_from_step0020_statutory_welfare(
+    objStep0020StatutoryWelfarePath: Path,
+) -> Path:
+    pszFileName: str = objStep0020StatutoryWelfarePath.name
+    if "_step0020_法定福利費_" not in pszFileName:
+        raise ValueError(f"Input is not step0020 statutory welfare file: {objStep0020StatutoryWelfarePath}")
+    pszOutputFileName: str = pszFileName.replace("_step0020_法定福利費_", "_step0021_法定福利費_", 1)
+    return objStep0020StatutoryWelfarePath.resolve().parent / pszOutputFileName
+
+
+def process_new_rawdata_step0021_statutory_welfare_from_step0020_statutory_welfare(
+    objStep0020StatutoryWelfarePath: Path,
+) -> int:
+    objInputRows: List[List[str]] = read_tsv_rows(objStep0020StatutoryWelfarePath)
+    if not objInputRows:
+        raise ValueError(f"Input TSV has no rows: {objStep0020StatutoryWelfarePath}")
+
+    objHeaderRow: List[str] = list(objInputRows[0])
+    objRequiredHeaderNames: List[str] = ["プロジェクト名", "法定福利費"]
+    objRequiredIndices: List[int] = get_required_header_indices(objHeaderRow, objRequiredHeaderNames)
+
+    objOutputRows: List[List[str]] = [objRequiredHeaderNames]
+    for objRow in objInputRows[1:]:
+        objOutputRows.append([
+            objRow[iColumnIndex] if iColumnIndex < len(objRow) else ""
+            for iColumnIndex in objRequiredIndices
+        ])
+
+    objOutputPath: Path = build_new_rawdata_step0021_statutory_welfare_output_path_from_step0020_statutory_welfare(
+        objStep0020StatutoryWelfarePath
+    )
+    write_sheet_to_tsv(objOutputPath, objOutputRows)
+    process_new_rawdata_step0022_statutory_welfare_from_step0021_statutory_welfare_with_org_table(objOutputPath)
+    return 0
+
+
+def build_new_rawdata_step0022_statutory_welfare_output_path_from_step0021_statutory_welfare(
+    objStep0021StatutoryWelfarePath: Path,
+) -> Path:
+    pszFileName: str = objStep0021StatutoryWelfarePath.name
+    if "_step0021_法定福利費_" not in pszFileName:
+        raise ValueError(f"Input is not step0021 statutory welfare file: {objStep0021StatutoryWelfarePath}")
+    pszOutputFileName: str = pszFileName.replace("_step0021_法定福利費_", "_step0022_法定福利費_", 1)
+    return objStep0021StatutoryWelfarePath.resolve().parent / pszOutputFileName
+
+
+def build_new_rawdata_step0022_statutory_welfare_error_path_from_step0022_statutory_welfare(
+    objStep0022StatutoryWelfarePath: Path,
+) -> Path:
+    return objStep0022StatutoryWelfarePath.resolve().parent / f"{objStep0022StatutoryWelfarePath.stem}_error.txt"
+
+
+def process_new_rawdata_step0022_statutory_welfare_from_step0021_statutory_welfare_with_org_table(
+    objStep0021StatutoryWelfarePath: Path,
+) -> int:
+    objInputRows: List[List[str]] = read_tsv_rows(objStep0021StatutoryWelfarePath)
+    if not objInputRows:
+        raise ValueError(f"Input TSV has no rows: {objStep0021StatutoryWelfarePath}")
+    objBaseDirectoryPath: Path = objStep0021StatutoryWelfarePath.resolve().parent
+    write_org_table_statutory_welfare_tsv_from_csv(objBaseDirectoryPath)
+    objOrgTablePath: Path = objBaseDirectoryPath / "管轄PJ表_法定福利.tsv"
+    objCodeToDebits: Dict[str, List[str]] = load_org_table_debit_project_codes_for_statutory_welfare(objOrgTablePath)
+
+    objHeaderRow: List[str] = list(objInputRows[0])
+    iProjectNameIndex: int = objHeaderRow.index("プロジェクト名") if "プロジェクト名" in objHeaderRow else 0
+    iInsertIndex: int = iProjectNameIndex
+
+    objOutputRows: List[List[str]] = []
+    objErrorLines: List[str] = []
+    for iRowIndex, objRow in enumerate(objInputRows):
+        objNewRow: List[str] = list(objRow)
+        if iRowIndex == 0:
+            pszDebitProjectCode: str = "借方プロジェクトコード"
+        else:
+            pszProjectName: str = objNewRow[iProjectNameIndex] if len(objNewRow) > iProjectNameIndex else ""
+            pszDebitProjectCode = build_debit_project_code_from_project_name_and_org_table_for_prepayed_commute(
+                pszProjectName,
+                objCodeToDebits,
+                objErrorLines,
+            )
+        objNewRow.insert(iInsertIndex, pszDebitProjectCode)
+        objOutputRows.append(objNewRow)
+
+    objOutputPath: Path = build_new_rawdata_step0022_statutory_welfare_output_path_from_step0021_statutory_welfare(
+        objStep0021StatutoryWelfarePath
+    )
+    write_sheet_to_tsv(objOutputPath, objOutputRows)
+    if objErrorLines:
+        objErrorPath: Path = build_new_rawdata_step0022_statutory_welfare_error_path_from_step0022_statutory_welfare(
+            objOutputPath
+        )
+        objErrorPath.write_text("\n".join(objErrorLines) + "\n", encoding="utf-8")
+    process_new_rawdata_step0023_statutory_welfare_from_step0022_statutory_welfare(objOutputPath)
+    return 0
+
+
+def build_new_rawdata_step0023_statutory_welfare_output_path_from_step0022_statutory_welfare(
+    objStep0022StatutoryWelfarePath: Path,
+) -> Path:
+    pszFileName: str = objStep0022StatutoryWelfarePath.name
+    if "_step0022_法定福利費_" not in pszFileName:
+        raise ValueError(f"Input is not step0022 statutory welfare file: {objStep0022StatutoryWelfarePath}")
+    pszOutputFileName: str = pszFileName.replace("_step0022_法定福利費_", "_step0023_法定福利費_", 1)
+    return objStep0022StatutoryWelfarePath.resolve().parent / pszOutputFileName
+
+
+def process_new_rawdata_step0023_statutory_welfare_from_step0022_statutory_welfare(
+    objStep0022StatutoryWelfarePath: Path,
+) -> int:
+    objInputRows: List[List[str]] = read_tsv_rows(objStep0022StatutoryWelfarePath)
+    if not objInputRows:
+        raise ValueError(f"Input TSV has no rows: {objStep0022StatutoryWelfarePath}")
+
+    objHeaderRow: List[str] = list(objInputRows[0])
+    iDebitProjectCodeIndex: int = (
+        objHeaderRow.index("借方プロジェクトコード")
+        if "借方プロジェクトコード" in objHeaderRow
+        else 0
+    )
+    iInsertIndex: int = iDebitProjectCodeIndex
+    objInsertedHeaders: List[str] = [
+        "借方税区分コード",
+        "借方税率種別コード",
+        "借方税率",
+        "借方取引先コード",
+    ]
+
+    objOutputRows: List[List[str]] = []
+    for iRowIndex, objRow in enumerate(objInputRows):
+        objNewRow: List[str] = list(objRow)
+        objInsertedValues: List[str] = list(objInsertedHeaders) if iRowIndex == 0 else ["", "", "", ""]
+        objNewRow[iInsertIndex:iInsertIndex] = objInsertedValues
+        objOutputRows.append(objNewRow)
+
+    objOutputPath: Path = build_new_rawdata_step0023_statutory_welfare_output_path_from_step0022_statutory_welfare(
+        objStep0022StatutoryWelfarePath
+    )
+    write_sheet_to_tsv(objOutputPath, objOutputRows)
+    process_new_rawdata_step0024_statutory_welfare_from_step0023_statutory_welfare_with_org_table(objOutputPath)
+    return 0
+
+
+def build_new_rawdata_step0024_statutory_welfare_output_path_from_step0023_statutory_welfare(
+    objStep0023StatutoryWelfarePath: Path,
+) -> Path:
+    pszFileName: str = objStep0023StatutoryWelfarePath.name
+    if "_step0023_法定福利費_" not in pszFileName:
+        raise ValueError(f"Input is not step0023 statutory welfare file: {objStep0023StatutoryWelfarePath}")
+    pszOutputFileName: str = pszFileName.replace("_step0023_法定福利費_", "_step0024_法定福利費_", 1)
+    return objStep0023StatutoryWelfarePath.resolve().parent / pszOutputFileName
+
+
+def build_new_rawdata_step0024_statutory_welfare_error_path_from_step0024_statutory_welfare(
+    objStep0024StatutoryWelfarePath: Path,
+) -> Path:
+    return objStep0024StatutoryWelfarePath.resolve().parent / f"{objStep0024StatutoryWelfarePath.stem}_error.txt"
+
+
+def process_new_rawdata_step0024_statutory_welfare_from_step0023_statutory_welfare_with_org_table(
+    objStep0023StatutoryWelfarePath: Path,
+) -> int:
+    objInputRows: List[List[str]] = read_tsv_rows(objStep0023StatutoryWelfarePath)
+    if not objInputRows:
+        raise ValueError(f"Input TSV has no rows: {objStep0023StatutoryWelfarePath}")
+
+    objOrgTablePath: Path = objStep0023StatutoryWelfarePath.resolve().parent / "管轄PJ表_法定福利.tsv"
+    objCodeToSubaccounts, objErrorLines = load_org_table_subaccount_codes_for_salary(objOrgTablePath)
+
+    objHeaderRow: List[str] = list(objInputRows[0])
+    iDebitTaxCategoryCodeIndex: int = (
+        objHeaderRow.index("借方税区分コード")
+        if "借方税区分コード" in objHeaderRow
+        else 0
+    )
+    iProjectNameIndex: int = objHeaderRow.index("プロジェクト名") if "プロジェクト名" in objHeaderRow else -1
+    iInsertIndex: int = iDebitTaxCategoryCodeIndex
+
+    objOutputRows: List[List[str]] = []
+    for iRowIndex, objRow in enumerate(objInputRows):
+        objNewRow: List[str] = list(objRow)
+        if iRowIndex == 0:
+            pszSubaccountCode: str = "借方補助科目コード"
+        else:
+            pszSubaccountCode = ""
+            if iProjectNameIndex == -1:
+                objErrorLines.append("step0023_法定福利費 にプロジェクト名列がありません。")
+            else:
+                pszProjectName: str = objNewRow[iProjectNameIndex] if len(objNewRow) > iProjectNameIndex else ""
+                pszProjectCodePrefix: str = extract_project_code_prefix_step0017(pszProjectName)
+                objCandidates: List[str] = objCodeToSubaccounts.get(pszProjectCodePrefix, [])
+                if len(objCandidates) == 0:
+                    objErrorLines.append(
+                        f"管轄PJ表_法定福利.tsv に該当する補助科目コードがありません。プロジェクト名={pszProjectName} コード={pszProjectCodePrefix}"
+                    )
+                elif len(objCandidates) >= 2:
+                    pszSubaccountCode = objCandidates[0]
+                    objErrorLines.append(
+                        f"管轄PJ表_法定福利.tsv に一致候補が複数あります。先頭一致を採用しました。プロジェクト名={pszProjectName} コード={pszProjectCodePrefix}"
+                    )
+                else:
+                    pszSubaccountCode = objCandidates[0]
+        objNewRow.insert(iInsertIndex, pszSubaccountCode)
+        objOutputRows.append(objNewRow)
+
+    objOutputPath: Path = build_new_rawdata_step0024_statutory_welfare_output_path_from_step0023_statutory_welfare(
+        objStep0023StatutoryWelfarePath
+    )
+    write_sheet_to_tsv(objOutputPath, objOutputRows)
+    if objErrorLines:
+        objErrorPath: Path = build_new_rawdata_step0024_statutory_welfare_error_path_from_step0024_statutory_welfare(
+            objOutputPath
+        )
+        objErrorPath.write_text("\n".join(objErrorLines) + "\n", encoding="utf-8")
+    process_new_rawdata_step0025_statutory_welfare_from_step0024_statutory_welfare_with_org_table(objOutputPath)
+    return 0
+
+
+def build_new_rawdata_step0025_statutory_welfare_output_path_from_step0024_statutory_welfare(
+    objStep0024StatutoryWelfarePath: Path,
+) -> Path:
+    pszFileName: str = objStep0024StatutoryWelfarePath.name
+    if "_step0024_法定福利費_" not in pszFileName:
+        raise ValueError(f"Input is not step0024 statutory welfare file: {objStep0024StatutoryWelfarePath}")
+    pszOutputFileName: str = pszFileName.replace("_step0024_法定福利費_", "_step0025_法定福利費_", 1)
+    return objStep0024StatutoryWelfarePath.resolve().parent / pszOutputFileName
+
+
+def build_new_rawdata_step0025_statutory_welfare_error_path_from_step0025_statutory_welfare(
+    objStep0025StatutoryWelfarePath: Path,
+) -> Path:
+    return objStep0025StatutoryWelfarePath.resolve().parent / f"{objStep0025StatutoryWelfarePath.stem}_error.txt"
+
+
+def process_new_rawdata_step0025_statutory_welfare_from_step0024_statutory_welfare_with_org_table(
+    objStep0024StatutoryWelfarePath: Path,
+) -> int:
+    objInputRows: List[List[str]] = read_tsv_rows(objStep0024StatutoryWelfarePath)
+    if not objInputRows:
+        raise ValueError(f"Input TSV has no rows: {objStep0024StatutoryWelfarePath}")
+
+    objBaseDirectoryPath: Path = objStep0024StatutoryWelfarePath.resolve().parent
+    write_org_table_statutory_welfare_tsv_from_csv(objBaseDirectoryPath)
+    objOrgTablePath: Path = objStep0024StatutoryWelfarePath.resolve().parent / "管轄PJ表_法定福利.tsv"
+    objCodeToAccounts, objErrorLines = load_org_table_account_codes_for_statutory_welfare(objOrgTablePath)
+
+    objHeaderRow: List[str] = list(objInputRows[0])
+    iDebitSubaccountCodeIndex: int = (
+        objHeaderRow.index("借方補助科目コード")
+        if "借方補助科目コード" in objHeaderRow
+        else 0
+    )
+    iProjectNameIndex: int = objHeaderRow.index("プロジェクト名") if "プロジェクト名" in objHeaderRow else -1
+    iInsertIndex: int = iDebitSubaccountCodeIndex
+
+    objOutputRows: List[List[str]] = []
+    for iRowIndex, objRow in enumerate(objInputRows):
+        objNewRow: List[str] = list(objRow)
+        if iRowIndex == 0:
+            pszAccountCode: str = "借方勘定科目コード"
+        else:
+            pszAccountCode = ""
+            if iProjectNameIndex == -1:
+                objErrorLines.append("step0024_法定福利費 にプロジェクト名列がありません。")
+            else:
+                pszProjectName: str = objNewRow[iProjectNameIndex] if len(objNewRow) > iProjectNameIndex else ""
+                pszProjectCodePrefix: str = extract_project_code_prefix_step0017(pszProjectName)
+                objCandidates: List[str] = objCodeToAccounts.get(pszProjectCodePrefix, [])
+                if len(objCandidates) == 0:
+                    objErrorLines.append(
+                        f"管轄PJ表_法定福利.tsv に該当する勘定科目コードがありません。プロジェクト名={pszProjectName} コード={pszProjectCodePrefix}"
+                    )
+                elif len(objCandidates) >= 2:
+                    pszAccountCode = objCandidates[0]
+                    objErrorLines.append(
+                        f"管轄PJ表_法定福利.tsv に一致候補が複数あります。先頭一致を採用しました。プロジェクト名={pszProjectName} コード={pszProjectCodePrefix}"
+                    )
+                else:
+                    pszAccountCode = objCandidates[0]
+        objNewRow.insert(iInsertIndex, pszAccountCode)
+        objOutputRows.append(objNewRow)
+
+    objOutputPath: Path = build_new_rawdata_step0025_statutory_welfare_output_path_from_step0024_statutory_welfare(
+        objStep0024StatutoryWelfarePath
+    )
+    write_sheet_to_tsv(objOutputPath, objOutputRows)
+    if objErrorLines:
+        objErrorPath: Path = build_new_rawdata_step0025_statutory_welfare_error_path_from_step0025_statutory_welfare(
+            objOutputPath
+        )
+        objErrorPath.write_text("\n".join(objErrorLines) + "\n", encoding="utf-8")
+    process_new_rawdata_step0026_statutory_welfare_from_step0025_statutory_welfare_with_org_table(objOutputPath)
+    return 0
+
+
+def build_new_rawdata_step0026_statutory_welfare_output_path_from_step0025_statutory_welfare(
+    objStep0025StatutoryWelfarePath: Path,
+) -> Path:
+    pszFileName: str = objStep0025StatutoryWelfarePath.name
+    if "_step0025_法定福利費_" not in pszFileName:
+        raise ValueError(f"Input is not step0025 statutory welfare file: {objStep0025StatutoryWelfarePath}")
+    pszOutputFileName: str = pszFileName.replace("_step0025_法定福利費_", "_step0026_法定福利費_", 1)
+    return objStep0025StatutoryWelfarePath.resolve().parent / pszOutputFileName
+
+
+def build_new_rawdata_step0026_statutory_welfare_error_path_from_step0026_statutory_welfare(
+    objStep0026StatutoryWelfarePath: Path,
+) -> Path:
+    return objStep0026StatutoryWelfarePath.resolve().parent / f"{objStep0026StatutoryWelfarePath.stem}_error.txt"
+
+
 def process_new_rawdata_step0026_statutory_welfare_from_step0025_statutory_welfare_with_org_table(
     objStep0025StatutoryWelfarePath: Path,
 ) -> int:
@@ -5680,6 +6194,7 @@ def main() -> int:
     objNewRawdataStep0023StatutoryWelfarePaths: List[Path] = []
     objNewRawdataStep0024StatutoryWelfarePaths: List[Path] = []
     objNewRawdataStep0025StatutoryWelfarePaths: List[Path] = []
+    objNewRawdataStep0026StatutoryWelfarePaths: List[Path] = []
     objManagementAccountingCandidatePaths: List[Path] = []
 
 
@@ -5774,6 +6289,8 @@ def main() -> int:
             objNewRawdataStep0024StatutoryWelfarePaths.append(objResolvedInputPath)
         if NEW_RAWDATA_STEP0025_STATUTORY_WELFARE_FILE_PATTERN.match(objResolvedInputPath.name) is not None:
             objNewRawdataStep0025StatutoryWelfarePaths.append(objResolvedInputPath)
+        if NEW_RAWDATA_STEP0026_STATUTORY_WELFARE_FILE_PATTERN.match(objResolvedInputPath.name) is not None:
+            objNewRawdataStep0026StatutoryWelfarePaths.append(objResolvedInputPath)
 
         if objResolvedInputPath.suffix.lower() in (".tsv", ".csv", ".xlsx"):
             objManagementAccountingCandidatePaths.append(objResolvedInputPath)
@@ -6818,6 +7335,24 @@ def main() -> int:
                 print(
                     "Error: failed to process step0026 from step0025 statutory welfare: {0}. Detail = {1}".format(
                         objNewRawdataStep0025StatutoryWelfarePath,
+                        objException,
+                    )
+                )
+                iExitCode = 1
+
+    if objNewRawdataStep0026StatutoryWelfarePaths:
+        for objNewRawdataStep0026StatutoryWelfarePath in objNewRawdataStep0026StatutoryWelfarePaths:
+            if objNewRawdataStep0026StatutoryWelfarePath.resolve() in objHandledInputPaths:
+                continue
+            try:
+                process_new_rawdata_step0027_statutory_welfare_from_step0026_statutory_welfare(
+                    objNewRawdataStep0026StatutoryWelfarePath
+                )
+                objHandledInputPaths.add(objNewRawdataStep0026StatutoryWelfarePath.resolve())
+            except Exception as objException:
+                print(
+                    "Error: failed to process step0027 from step0026 statutory welfare: {0}. Detail = {1}".format(
+                        objNewRawdataStep0026StatutoryWelfarePath,
                         objException,
                     )
                 )
