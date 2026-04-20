@@ -4722,6 +4722,8 @@ def process_new_rawdata_step0025_statutory_welfare_from_step0024_statutory_welfa
     if not objInputRows:
         raise ValueError(f"Input TSV has no rows: {objStep0024StatutoryWelfarePath}")
 
+    objBaseDirectoryPath: Path = objStep0024StatutoryWelfarePath.resolve().parent
+    write_org_table_statutory_welfare_tsv_from_csv(objBaseDirectoryPath)
     objOrgTablePath: Path = objStep0024StatutoryWelfarePath.resolve().parent / "管轄PJ表_法定福利.tsv"
     objCodeToAccounts, objErrorLines = load_org_table_account_codes_for_statutory_welfare(objOrgTablePath)
 
@@ -4797,6 +4799,8 @@ def process_new_rawdata_step0026_statutory_welfare_from_step0025_statutory_welfa
     if not objInputRows:
         raise ValueError(f"Input TSV has no rows: {objStep0025StatutoryWelfarePath}")
 
+    objBaseDirectoryPath: Path = objStep0025StatutoryWelfarePath.resolve().parent
+    write_org_table_statutory_welfare_tsv_from_csv(objBaseDirectoryPath)
     objOrgTablePath: Path = objStep0025StatutoryWelfarePath.resolve().parent / "管轄PJ表_法定福利.tsv"
     objCodeToDepartments, objErrorLines = load_org_table_department_codes_for_statutory_welfare(objOrgTablePath)
 
