@@ -73,6 +73,7 @@ NEW_RAWDATA_STEP0025_STATUTORY_WELFARE_FILE_PATTERN: re.Pattern[str] = re.compil
 NEW_RAWDATA_STEP0026_STATUTORY_WELFARE_FILE_PATTERN: re.Pattern[str] = re.compile(r"^新_ローデータ_シート_step0026_法定福利費_\d{4}年\d{2}月\.tsv$")
 NEW_RAWDATA_STEP0027_STATUTORY_WELFARE_FILE_PATTERN: re.Pattern[str] = re.compile(r"^新_ローデータ_シート_step0027_法定福利費_\d{4}年\d{2}月\.tsv$")
 NEW_RAWDATA_STEP0028_STATUTORY_WELFARE_FILE_PATTERN: re.Pattern[str] = re.compile(r"^新_ローデータ_シート_step0028_法定福利費_\d{4}年\d{2}月\.tsv$")
+NEW_RAWDATA_STEP0029_STATUTORY_WELFARE_FILE_PATTERN: re.Pattern[str] = re.compile(r"^新_ローデータ_シート_step0029_法定福利費_\d{4}年\d{2}月\.tsv$")
 PREPAYED_COMMUTE_STEP0006_MONTHLY_FILE_PATTERN: re.Pattern[str] = re.compile(
     r"^新_ローデータ_シート_step0006_(\d{4}年(?:04-09月|10-03月))_(\d{2})月_前払通勤交通費按分表\.tsv$"
 )
@@ -5784,6 +5785,16 @@ def build_new_rawdata_step0028_statutory_welfare_error_path_from_step0028_statut
     return objStep0028StatutoryWelfarePath.resolve().parent / f"{objStep0028StatutoryWelfarePath.stem}_error.txt"
 
 
+def build_new_rawdata_step0029_statutory_welfare_output_path_from_step0028_statutory_welfare(
+    objStep0028StatutoryWelfarePath: Path,
+) -> Path:
+    pszFileName: str = objStep0028StatutoryWelfarePath.name
+    if "_step0028_法定福利費_" not in pszFileName:
+        raise ValueError(f"Input is not step0028 statutory welfare file: {objStep0028StatutoryWelfarePath}")
+    pszOutputFileName: str = pszFileName.replace("_step0028_法定福利費_", "_step0029_法定福利費_", 1)
+    return objStep0028StatutoryWelfarePath.resolve().parent / pszOutputFileName
+
+
 def build_statutory_welfare_voucher_date_from_step0026_path(
     objStep0026StatutoryWelfarePath: Path,
 ) -> str:
@@ -6486,6 +6497,54 @@ def process_new_rawdata_step0028_statutory_welfare_from_step0027_statutory_welfa
             objOutputPath
         )
         objErrorPath.write_text("\n".join(objErrorLines) + "\n", encoding="utf-8")
+    process_new_rawdata_step0029_statutory_welfare_from_step0028_statutory_welfare(objOutputPath)
+    return 0
+
+
+def process_new_rawdata_step0029_statutory_welfare_from_step0028_statutory_welfare(
+    objStep0028StatutoryWelfarePath: Path,
+) -> int:
+    objInputRows: List[List[str]] = read_tsv_rows(objStep0028StatutoryWelfarePath)
+    if not objInputRows:
+        raise ValueError(f"Input TSV has no rows: {objStep0028StatutoryWelfarePath}")
+
+    objHeaderRow: List[str] = list(objInputRows[0])
+    iDebitAmountIndex: int = objHeaderRow.index("借方本体金額") if "借方本体金額" in objHeaderRow else len(objHeaderRow)
+    iInsertIndex: int = iDebitAmountIndex + 1
+    objInsertedHeaders: List[str] = [
+        "貸方部門コード",
+        "貸方勘定科目コード",
+        "貸方補助科目コード",
+        "貸方税区分コード",
+        "貸方税率種別コード",
+        "貸方税率",
+        "貸方取引先コード",
+        "貸方プロジェクトコード",
+        "貸方本体金額",
+        "摘要",
+    ]
+
+    objOutputRows: List[List[str]] = []
+    for iRowIndex, objRow in enumerate(objInputRows):
+        objNewRow: List[str] = list(objRow)
+        objInsertedValues: List[str] = list(objInsertedHeaders) if iRowIndex == 0 else [""] * len(objInsertedHeaders)
+        objNewRow[iInsertIndex:iInsertIndex] = objInsertedValues
+        objOutputRows.append(objNewRow)
+
+    iRequiredColumns: int = len(objOutputRows[0]) if objOutputRows else iInsertIndex + len(objInsertedHeaders)
+    if len(objOutputRows) < 2:
+        objOutputRows.append([""] * iRequiredColumns)
+    if len(objOutputRows[1]) < iRequiredColumns:
+        objOutputRows[1].extend([""] * (iRequiredColumns - len(objOutputRows[1])))
+    objOutputRows[1][iInsertIndex + 0] = "0"
+    objOutputRows[1][iInsertIndex + 1] = "151"
+    objOutputRows[1][iInsertIndex + 2] = "6"
+    objOutputRows[1][iInsertIndex + 9] = "社員通勤定期代振替"
+
+    objOutputPath: Path = build_new_rawdata_step0029_statutory_welfare_output_path_from_step0028_statutory_welfare(
+        objStep0028StatutoryWelfarePath
+    )
+    write_sheet_to_tsv(objOutputPath, objOutputRows)
     return 0
 
 
@@ -7320,6 +7379,7 @@ def main() -> int:
     objNewRawdataStep0025StatutoryWelfarePaths: List[Path] = []
     objNewRawdataStep0026StatutoryWelfarePaths: List[Path] = []
     objNewRawdataStep0027StatutoryWelfarePaths: List[Path] = []
+    objNewRawdataStep0028StatutoryWelfarePaths: List[Path] = []
     objManagementAccountingCandidatePaths: List[Path] = []
 
 
@@ -7418,6 +7478,8 @@ def main() -> int:
             objNewRawdataStep0026StatutoryWelfarePaths.append(objResolvedInputPath)
         if NEW_RAWDATA_STEP0027_STATUTORY_WELFARE_FILE_PATTERN.match(objResolvedInputPath.name) is not None:
             objNewRawdataStep0027StatutoryWelfarePaths.append(objResolvedInputPath)
+        if NEW_RAWDATA_STEP0028_STATUTORY_WELFARE_FILE_PATTERN.match(objResolvedInputPath.name) is not None:
+            objNewRawdataStep0028StatutoryWelfarePaths.append(objResolvedInputPath)
 
         if objResolvedInputPath.suffix.lower() in (".tsv", ".csv", ".xlsx"):
             objManagementAccountingCandidatePaths.append(objResolvedInputPath)
@@ -8513,6 +8575,24 @@ def main() -> int:
                 print(
                     "Error: failed to process step0028 from step0027 statutory welfare: {0}. Detail = {1}".format(
                         objNewRawdataStep0027StatutoryWelfarePath,
+                        objException,
+                    )
+                )
+                iExitCode = 1
+
+    if objNewRawdataStep0028StatutoryWelfarePaths:
+        for objNewRawdataStep0028StatutoryWelfarePath in objNewRawdataStep0028StatutoryWelfarePaths:
+            if objNewRawdataStep0028StatutoryWelfarePath.resolve() in objHandledInputPaths:
+                continue
+            try:
+                process_new_rawdata_step0029_statutory_welfare_from_step0028_statutory_welfare(
+                    objNewRawdataStep0028StatutoryWelfarePath
+                )
+                objHandledInputPaths.add(objNewRawdataStep0028StatutoryWelfarePath.resolve())
+            except Exception as objException:
+                print(
+                    "Error: failed to process step0029 from step0028 statutory welfare: {0}. Detail = {1}".format(
+                        objNewRawdataStep0028StatutoryWelfarePath,
                         objException,
                     )
                 )
