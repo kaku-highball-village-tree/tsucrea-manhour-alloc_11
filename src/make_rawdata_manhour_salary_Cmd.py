@@ -6454,14 +6454,14 @@ def process_new_rawdata_step0028_statutory_welfare_from_step0027_statutory_welfa
         objStep0027StatutoryWelfarePath
     )
 
-    if "給与合計" not in objHeaderRow:
-        objErrorLines.append("step0027_法定福利費 に給与合計列がありません。")
+    if "法定福利費" not in objHeaderRow:
+        objErrorLines.append("step0027_法定福利費 に法定福利費列がありません。")
         objErrorPath: Path = build_new_rawdata_step0028_statutory_welfare_error_path_from_step0028_statutory_welfare(
             objOutputPath
         )
         objErrorPath.write_text("\n".join(objErrorLines) + "\n", encoding="utf-8")
-        raise ValueError(f"Missing required header: 給与合計. Input = {objStep0027StatutoryWelfarePath}")
-    iAmountIndex: int = objHeaderRow.index("給与合計")
+        raise ValueError(f"Missing required header: 法定福利費. Input = {objStep0027StatutoryWelfarePath}")
+    iAmountIndex: int = objHeaderRow.index("法定福利費")
 
     objDeleteColumnName: str = "プロジェクト名"
     objDeleteIndices: List[int] = []
