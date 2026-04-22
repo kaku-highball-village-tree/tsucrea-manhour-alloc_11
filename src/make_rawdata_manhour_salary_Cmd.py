@@ -2984,7 +2984,7 @@ def process_new_rawdata_step0028_from_step0027(
         objOutputRows[1].extend([""] * (iRequiredColumns - len(objOutputRows[1])))
     objOutputRows[1][iInsertIndex + 0] = "0"
     objOutputRows[1][iInsertIndex + 1] = "6110"
-    objOutputRows[1][iInsertIndex + 2] = "6"
+    objOutputRows[1][iInsertIndex + 2] = "0"
     objOutputRows[1][iInsertIndex + 9] = "社員通勤定期代振替"
 
     objOutputPath: Path = build_new_rawdata_step0028_output_path_from_step0027(objStep0027Path)
